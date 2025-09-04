@@ -2,4 +2,4 @@ streamlit
 pandas
 altair
 streamlit-authenticator
-sqlalchemy-libsql
+libsql_client
