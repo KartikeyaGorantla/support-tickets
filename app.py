@@ -10,7 +10,8 @@ from libsql_client import create_client_sync
 st.set_page_config(
     page_title="Database To-Do List",
     page_icon="🔐",
-    layout="centered"
+    layout="wide",
+    initial_sidebar_state="auto",
 )
 
 # --- Turso DB Connection ---
@@ -76,103 +77,135 @@ if not st.session_state.get("authentication_status"):
 # --- App (only if logged in) ---
 if st.session_state.get("authentication_status"):
     username = st.session_state["username"]
-
     init_db()
+    authenticator.logout("Logout", "sidebar",use_container_width=True)
+    st.title(f"Welcome {username}")
 
-    st.sidebar.write(f"Welcome *{username}*")
-    authenticator.logout("Logout", "sidebar")
-
-    st.title(f"✅ {username}'s To-Do List")
-    st.write("Your tasks are securely saved to a cloud database.")
-    st.write("---")
-
+    main1,main2=st.columns([7,3])
+    with main1:
+        st.header("✅ To-Do List")
     # --- Add Task ---
-    st.header("Add a New Task", divider="rainbow")
-    with st.form("add_task_form", clear_on_submit=True):
-        task_description = st.text_input("Task Description", placeholder="What do you need to do?")
-        task_priority = st.selectbox("Priority", ["High", "Medium", "Low"])
-        submitted = st.form_submit_button("Add Task")
+        st.subheader("Add a New Task", divider="rainbow")
+        with st.form("add_task_form", clear_on_submit=True):
+            task_description = st.text_input("Task Description", placeholder="What do you need to do?")
+            task_priority = st.selectbox("Priority", ["High", "Medium", "Low"])
+            submitted = st.form_submit_button("Add Task")
 
-    if submitted and task_description:
-        client.execute(
-            "INSERT INTO tasks (Username, Task, Status, Priority, CreatedAt) VALUES (?, ?, ?, ?, ?);",
-            [username, task_description, "To Do", task_priority, datetime.now().isoformat()]
-        )
-        st.rerun()
-
-    # --- Load Tasks ---
-    df = load_user_tasks(username)
-    active_tasks = df[df["Status"] != "Done"].copy()
-    completed_tasks = df[df["Status"] == "Done"].copy()
-
-    st.write("---")
-    st.header("Active Tasks", divider="rainbow")
-
-    if not active_tasks.empty:
-        active_tasks["Delete"] = False
-
-        edited_active_tasks = st.data_editor(
-            active_tasks,
-            use_container_width=True,
-            hide_index=True,
-            column_order=("Task", "Status", "Priority", "CreatedAt", "Delete"),
-            column_config={
-                "Task": st.column_config.TextColumn("Task Description", required=True),
-                "Status": st.column_config.SelectboxColumn("Status", options=["To Do", "In Progress", "Done"], required=True),
-                "Priority": st.column_config.SelectboxColumn("Priority", options=["High", "Medium", "Low"], required=True),
-                "CreatedAt": st.column_config.DatetimeColumn("Created At", format="D MMM YYYY, h:mm a", disabled=True),
-                "Delete": st.column_config.CheckboxColumn("Delete"),
-            },
-            key="active_tasks_editor"
-        )
-
-        # Handle updates
-        for idx, row in edited_active_tasks.iterrows():
-            orig = active_tasks.loc[idx]
-            if row["Task"] != orig["Task"] or row["Priority"] != orig["Priority"] or row["Status"] != orig["Status"]:
-                client.execute(
-                    "UPDATE tasks SET Task = ?, Priority = ?, Status = ? WHERE rowid = ? AND Username = ?;",
-                    [row["Task"], row["Priority"], row["Status"], row["id"], username]
-                )
-                st.rerun()
-
-        # Handle deletes
-        deleted_indices = edited_active_tasks[edited_active_tasks["Delete"]].index
-        if not deleted_indices.empty:
-            for idx in deleted_indices:
-                client.execute(
-                    "DELETE FROM tasks WHERE rowid = ? AND Username = ?;",
-                    [edited_active_tasks.loc[idx, "id"], username]
-                )
+        if submitted and task_description:
+            client.execute(
+                "INSERT INTO tasks (Username, Task, Status, Priority, CreatedAt) VALUES (?, ?, ?, ?, ?);",
+                [username, task_description, "To Do", task_priority, datetime.now().isoformat()]
+            )
             st.rerun()
 
-    else:
-        st.info("No active tasks. Add one above!")
+        # --- Load Tasks ---
+        df = load_user_tasks(username)
+        active_tasks = df[df["Status"] != "Done"].copy()
+        completed_tasks = df[df["Status"] == "Done"].copy()
 
-    st.header("Completed Tasks", divider="rainbow")
-    if not completed_tasks.empty:
-        for _, row in completed_tasks.iterrows():
-            col1, col2, col3 = st.columns([0.6, 0.2, 0.2])
-            with col1:
-                st.markdown(f"~~_{row['Task']}_~~")
-            with col2:
-                if st.button("Undo", key=f"undo_{row['id']}"):
+
+        st.subheader("Active Tasks", divider="rainbow")
+
+        if not active_tasks.empty:
+            active_tasks["Delete"] = False
+
+            edited_active_tasks = st.data_editor(
+                active_tasks,
+                use_container_width=True,
+                hide_index=True,
+                column_order=("Task", "Status", "Priority", "CreatedAt", "Delete"),
+                column_config={
+                    "Task": st.column_config.TextColumn("Task Description", required=True),
+                    "Status": st.column_config.SelectboxColumn("Status", options=["To Do", "In Progress", "Done"], required=True),
+                    "Priority": st.column_config.SelectboxColumn("Priority", options=["High", "Medium", "Low"], required=True),
+                    "CreatedAt": st.column_config.DatetimeColumn("Created At", format="D MMM YYYY, h:mm a", disabled=True),
+                    "Delete": st.column_config.CheckboxColumn("Delete"),
+                },
+                key="active_tasks_editor"
+            )
+
+            # Handle updates
+            for idx, row in edited_active_tasks.iterrows():
+                orig = active_tasks.loc[idx]
+                if row["Task"] != orig["Task"] or row["Priority"] != orig["Priority"] or row["Status"] != orig["Status"]:
                     client.execute(
-                        "UPDATE tasks SET Status = 'To Do' WHERE rowid = ? AND Username = ?;",
-                        [row["id"], username]
+                        "UPDATE tasks SET Task = ?, Priority = ?, Status = ? WHERE rowid = ? AND Username = ?;",
+                        [row["Task"], row["Priority"], row["Status"], row["id"], username]
                     )
                     st.rerun()
-            with col3:
-                if st.button("❌ Delete", key=f"delete_{row['id']}"):
+
+            # Handle deletes
+            deleted_indices = edited_active_tasks[edited_active_tasks["Delete"]].index
+            if not deleted_indices.empty:
+                for idx in deleted_indices:
                     client.execute(
                         "DELETE FROM tasks WHERE rowid = ? AND Username = ?;",
-                        [row["id"], username]
+                        [edited_active_tasks.loc[idx, "id"], username]
                     )
-                    st.rerun()
-    else:
-        st.info("No tasks have been completed yet.")
+                st.rerun()
 
-    st.write("---")
+        else:
+            st.info("No active tasks. Add one above!")
+
+        st.subheader("Completed Tasks", divider="rainbow")
+        if not completed_tasks.empty:
+            for _, row in completed_tasks.iterrows():
+                col1, col2, col3 = st.columns([0.6, 0.2, 0.2])
+                with col1:
+                    st.markdown(f"~~_{row['Task']}_~~")
+                with col2:
+                    if st.button("Undo", key=f"undo_{row['id']}"):
+                        client.execute(
+                            "UPDATE tasks SET Status = 'To Do' WHERE rowid = ? AND Username = ?;",
+                            [row["id"], username]
+                        )
+                        st.rerun()
+                with col3:
+                    if st.button("❌ Delete", key=f"delete_{row['id']}"):
+                        client.execute(
+                            "DELETE FROM tasks WHERE rowid = ? AND Username = ?;",
+                            [row["id"], username]
+                        )
+                        st.rerun()
+        else:
+            st.info("No tasks have been completed yet.")
+
+    with main2:
+        st.header("📝 Notes")
+        st.subheader("Add a New Note", divider="rainbow")
+
+        
+        if "notes" not in st.session_state:
+            st.session_state.notes = []
+
+        # Input for new note
+        with st.form("add_note", clear_on_submit=True):
+            new_note = st.text_input(" ",placeholder="What do you need to Remember?")
+            submitted = st.form_submit_button("Add Note")
+            if submitted and new_note.strip():
+                st.session_state.notes.append(new_note.strip())
+
+        for i, note in enumerate(st.session_state.notes):
+            with st.container():
+                st.markdown(
+                    f"""
+                    <div style="
+                        background-color:#262730;
+                        color: white;
+                        padding:15px;
+                        margin:10px;
+                        border-radius:10px;
+                        min-height:75px;
+                    ">
+                    <p>{note}</p>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+                if st.button("❌ Delete", key=f"del_{i}"):
+                    st.session_state.notes.pop(i)
+                    st.rerun()
+
 
     # --- Sidebar Stats ---
     with st.sidebar:
