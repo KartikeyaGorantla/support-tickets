@@ -14,28 +14,11 @@ st.set_page_config(
     initial_sidebar_state="auto",
 )
 
-
 # --- Turso DB Connection ---
-def get_client():
-    """Return a cached DB client."""
-    if "db_client" not in st.session_state:
-        st.session_state.db_client = create_client_sync(
-            url=st.secrets["turso"]["url"],
-            auth_token=st.secrets["turso"]["token"]
-        )
-    return st.session_state.db_client
-
-def close_client():
-    """Close DB client when app shuts down."""
-    if "db_client" in st.session_state:
-        try:
-            st.session_state.db_client.close()
-        except Exception:
-            pass
-
-st.on_event("shutdown", close_client)
-
-client = get_client()
+client = create_client_sync(
+    url=st.secrets["turso"]["url"],
+    auth_token=st.secrets["turso"]["token"]
+)
 
 def init_db():
     """Ensure tasks and notes tables exist."""
@@ -83,7 +66,7 @@ authenticator = stauth.Authenticate(
 
 # --- Login ---
 if not st.session_state.get("authentication_status"):
-    col1, col2, col3 = st.columns([0.5, 2, 0.5])
+    col1, col2, col3 = st.columns([1.5, 2, 1.5])
     with col2:
         try:
             authenticator.login(
@@ -110,7 +93,7 @@ if not st.session_state.get("authentication_status"):
 if st.session_state.get("authentication_status"):
     username = st.session_state["username"]
     init_db()
-    authenticator.logout("Logout", "sidebar", width="stretch")
+    authenticator.logout("Logout", "sidebar", use_container_width=True)
     st.title(f"Welcome {username}")
 
     main1, main2 = st.columns([7, 3])
@@ -280,6 +263,6 @@ if st.session_state.get("authentication_status"):
                 tooltip=["Priority", "Count"]
             ).properties(title="Tasks by Priority")
 
-            st.altair_chart(chart, width="stretch")
+            st.altair_chart(chart, use_container_width=True)
         else:
             st.write("No tasks to show statistics for.")
