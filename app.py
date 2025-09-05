@@ -15,10 +15,26 @@ st.set_page_config(
 )
 
 # --- Turso DB Connection ---
-client = create_client_sync(
-    url=st.secrets["turso"]["url"],
-    auth_token=st.secrets["turso"]["token"]
-)
+def get_client():
+    """Return a cached DB client."""
+    if "db_client" not in st.session_state:
+        st.session_state.db_client = create_client_sync(
+            url=st.secrets["turso"]["url"],
+            auth_token=st.secrets["turso"]["token"]
+        )
+    return st.session_state.db_client
+
+def close_client():
+    """Close DB client when app shuts down."""
+    if "db_client" in st.session_state:
+        try:
+            st.session_state.db_client.close()
+        except Exception:
+            pass
+
+st.on_event("shutdown", close_client)
+
+client = get_client()
 
 def init_db():
     """Ensure tasks and notes tables exist."""
@@ -93,7 +109,7 @@ if not st.session_state.get("authentication_status"):
 if st.session_state.get("authentication_status"):
     username = st.session_state["username"]
     init_db()
-    authenticator.logout("Logout", "sidebar", use_container_width=True)
+    authenticator.logout("Logout", "sidebar", width="stretch")
     st.title(f"Welcome {username}")
 
     main1, main2 = st.columns([7, 3])
@@ -125,7 +141,7 @@ if st.session_state.get("authentication_status"):
 
             edited_active_tasks = st.data_editor(
                 active_tasks,
-                use_container_width=True,
+                width="stretch",
                 hide_index=True,
                 column_order=("Task", "Status", "Priority", "CreatedAt", "Delete"),
                 column_config={
@@ -263,6 +279,6 @@ if st.session_state.get("authentication_status"):
                 tooltip=["Priority", "Count"]
             ).properties(title="Tasks by Priority")
 
-            st.altair_chart(chart, use_container_width=True)
+            st.altair_chart(chart, width="stretch")
         else:
             st.write("No tasks to show statistics for.")
