@@ -179,7 +179,7 @@ if st.session_state.get("authentication_status"):
 
         # Input for new note
         with st.form("add_note", clear_on_submit=True):
-            new_note = st.text_input(" ", placeholder="What do you need to remember?")
+            new_note = st.text_area(" ", placeholder="What do you need to remember?")
             submitted = st.form_submit_button("Add Note")
             if submitted and new_note.strip():
                 client.execute(
