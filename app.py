@@ -21,7 +21,7 @@ client = create_client_sync(
 )
 
 def init_db():
-    """Ensure tasks table exists."""
+    """Ensure tasks and notes tables exist."""
     client.execute("""
         CREATE TABLE IF NOT EXISTS tasks (
             Username TEXT NOT NULL,
@@ -31,15 +31,30 @@ def init_db():
             CreatedAt TEXT
         );
     """)
+    client.execute("""
+        CREATE TABLE IF NOT EXISTS notes (
+            Username TEXT NOT NULL,
+            Note TEXT NOT NULL,
+            CreatedAt TEXT
+        );
+    """)
 
 def load_user_tasks(username: str) -> pd.DataFrame:
-    """Load all tasks for a specific user."""
     rows = client.execute(
         "SELECT rowid AS id, * FROM tasks WHERE Username = ?;",
         [username]
     ).rows
     return pd.DataFrame(rows, columns=["id", "Username", "Task", "Status", "Priority", "CreatedAt"]) if rows else pd.DataFrame(
         columns=["id", "Username", "Task", "Status", "Priority", "CreatedAt"]
+    )
+
+def load_user_notes(username: str) -> pd.DataFrame:
+    rows = client.execute(
+        "SELECT rowid AS id, * FROM notes WHERE Username = ? ORDER BY CreatedAt DESC;",
+        [username]
+    ).rows
+    return pd.DataFrame(rows, columns=["id", "Username", "Note", "CreatedAt"]) if rows else pd.DataFrame(
+        columns=["id", "Username", "Note", "CreatedAt"]
     )
 
 # --- Authenticator ---
@@ -78,13 +93,13 @@ if not st.session_state.get("authentication_status"):
 if st.session_state.get("authentication_status"):
     username = st.session_state["username"]
     init_db()
-    authenticator.logout("Logout", "sidebar",use_container_width=True)
+    authenticator.logout("Logout", "sidebar", use_container_width=True)
     st.title(f"Welcome {username}")
 
-    main1,main2=st.columns([7,3])
+    main1, main2 = st.columns([7, 3])
     with main1:
         st.header("✅ To-Do List")
-    # --- Add Task ---
+        # --- Add Task ---
         st.subheader("Add a New Task", divider="rainbow")
         with st.form("add_task_form", clear_on_submit=True):
             task_description = st.text_input("Task Description", placeholder="What do you need to do?")
@@ -102,7 +117,6 @@ if st.session_state.get("authentication_status"):
         df = load_user_tasks(username)
         active_tasks = df[df["Status"] != "Done"].copy()
         completed_tasks = df[df["Status"] == "Done"].copy()
-
 
         st.subheader("Active Tasks", divider="rainbow")
 
@@ -170,42 +184,50 @@ if st.session_state.get("authentication_status"):
         else:
             st.info("No tasks have been completed yet.")
 
+    # --- Notes Section ---
     with main2:
         st.header("📝 Notes")
         st.subheader("Add a New Note", divider="rainbow")
 
-        
-        if "notes" not in st.session_state:
-            st.session_state.notes = []
+        notes_df = load_user_notes(username)
 
         # Input for new note
         with st.form("add_note", clear_on_submit=True):
-            new_note = st.text_input(" ",placeholder="What do you need to Remember?")
+            new_note = st.text_input(" ", placeholder="What do you need to remember?")
             submitted = st.form_submit_button("Add Note")
             if submitted and new_note.strip():
-                st.session_state.notes.append(new_note.strip())
-
-        for i, note in enumerate(st.session_state.notes):
-            with st.container():
-                st.markdown(
-                    f"""
-                    <div style="
-                        background-color:#262730;
-                        color: white;
-                        padding:15px;
-                        margin:10px;
-                        border-radius:10px;
-                        min-height:75px;
-                    ">
-                    <p>{note}</p>
-                    </div>
-                    """,
-                    unsafe_allow_html=True,
+                client.execute(
+                    "INSERT INTO notes (Username, Note, CreatedAt) VALUES (?, ?, ?);",
+                    [username, new_note.strip(), datetime.now().isoformat()]
                 )
-                if st.button("❌ Delete", key=f"del_{i}"):
-                    st.session_state.notes.pop(i)
-                    st.rerun()
+                st.rerun()
 
+        if not notes_df.empty:
+            for _, row in notes_df.iterrows():
+                with st.container():
+                    st.markdown(
+                        f"""
+                        <div style="
+                            background-color:#262730;
+                            color: white;
+                            padding:15px;
+                            margin:10px;
+                            border-radius:10px;
+                            min-height:75px;
+                        ">
+                        <p>{row['Note']}</p>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+                    if st.button("❌ Delete", key=f"del_note_{row['id']}"):
+                        client.execute(
+                            "DELETE FROM notes WHERE rowid = ? AND Username = ?;",
+                            [row["id"], username]
+                        )
+                        st.rerun()
+        else:
+            st.info("No notes yet. Add one above!")
 
     # --- Sidebar Stats ---
     with st.sidebar:
