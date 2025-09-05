@@ -8,8 +8,8 @@ from libsql_client import create_client_sync
 
 # --- Page Config ---
 st.set_page_config(
-    page_title="Database To-Do List",
-    page_icon="🔐",
+    page_title="To-Do App",
+    page_icon="📔",
     layout="wide",
     initial_sidebar_state="auto",
 )
@@ -121,19 +121,16 @@ if st.session_state.get("authentication_status"):
         st.subheader("Active Tasks", divider="rainbow")
 
         if not active_tasks.empty:
-            active_tasks["Delete"] = False
-
             edited_active_tasks = st.data_editor(
                 active_tasks,
                 width="stretch",
                 hide_index=True,
-                column_order=("Task", "Status", "Priority", "CreatedAt", "Delete"),
+                column_order=("Task", "Status", "Priority", "CreatedAt"),
                 column_config={
                     "Task": st.column_config.TextColumn("Task Description", required=True),
                     "Status": st.column_config.SelectboxColumn("Status", options=["To Do", "In Progress", "Done"], required=True),
                     "Priority": st.column_config.SelectboxColumn("Priority", options=["High", "Medium", "Low"], required=True),
                     "CreatedAt": st.column_config.DatetimeColumn("Created At", format="D MMM YYYY, h:mm a", disabled=True),
-                    "Delete": st.column_config.CheckboxColumn("Delete"),
                 },
                 key="active_tasks_editor"
             )
@@ -147,17 +144,6 @@ if st.session_state.get("authentication_status"):
                         [row["Task"], row["Priority"], row["Status"], row["id"], username]
                     )
                     st.rerun()
-
-            # Handle deletes
-            deleted_indices = edited_active_tasks[edited_active_tasks["Delete"]].index
-            if not deleted_indices.empty:
-                for idx in deleted_indices:
-                    client.execute(
-                        "DELETE FROM tasks WHERE rowid = ? AND Username = ?;",
-                        [edited_active_tasks.loc[idx, "id"], username]
-                    )
-                st.rerun()
-
         else:
             st.info("No active tasks. Add one above!")
 
@@ -175,7 +161,7 @@ if st.session_state.get("authentication_status"):
                         )
                         st.rerun()
                 with col3:
-                    if st.button("❌ Delete", key=f"delete_{row['id']}"):
+                    if st.button("❌", key=f"delete_{row['id']}"):
                         client.execute(
                             "DELETE FROM tasks WHERE rowid = ? AND Username = ?;",
                             [row["id"], username]
@@ -220,7 +206,7 @@ if st.session_state.get("authentication_status"):
                         """,
                         unsafe_allow_html=True,
                     )
-                    if st.button("❌ Delete", key=f"del_note_{row['id']}"):
+                    if st.button("❌", key=f"del_note_{row['id']}"):
                         client.execute(
                             "DELETE FROM notes WHERE rowid = ? AND Username = ?;",
                             [row["id"], username]
