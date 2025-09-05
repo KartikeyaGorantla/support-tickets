@@ -66,7 +66,7 @@ authenticator = stauth.Authenticate(
 
 # --- Login ---
 if not st.session_state.get("authentication_status"):
-    col1, col2, col3 = st.columns([0.5, 2, 0.5])
+    col1, col2, col3 = st.columns([1.5, 2, 1.5])
     with col2:
         try:
             authenticator.login(
