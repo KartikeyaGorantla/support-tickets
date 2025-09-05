@@ -14,6 +14,7 @@ st.set_page_config(
     initial_sidebar_state="auto",
 )
 
+
 # --- Turso DB Connection ---
 def get_client():
     """Return a cached DB client."""
