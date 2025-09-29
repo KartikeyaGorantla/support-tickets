@@ -88,7 +88,7 @@ if not st.session_state.get("authentication_status"):
             st.stop()
         elif st.session_state["authentication_status"] is None:
             st.stop()
-
+st.balloons()
 # --- App (only if logged in) ---
 if st.session_state.get("authentication_status"):
     username = st.session_state["username"]
@@ -219,16 +219,19 @@ if st.session_state.get("authentication_status"):
     with st.sidebar:
         st.header("📊 Task Statistics", divider="rainbow")
         if not df.empty:
-            total_tasks = len(df)
+            all_tasks_count = len(df)
             tasks_done = len(df[df["Status"] == "Done"])
+            # MODIFIED: Calculate pending tasks and change the metric
+            pending_tasks_count = all_tasks_count - tasks_done
 
-            st.metric("Total Tasks", total_tasks)
-            st.metric("✔️ Completed", tasks_done)
+            st.metric("Total Tasks", pending_tasks_count)
             st.metric("📝 To Do", len(df[df["Status"] == "To Do"]))
             st.metric("⏳ In Progress", len(df[df["Status"] == "In Progress"]))
+            st.metric("✔️ Completed", tasks_done)
 
-            if total_tasks > 0:
-                st.progress(tasks_done / total_tasks, text=f"{tasks_done/total_tasks:.0%} Complete")
+            # The progress bar should still be based on the grand total
+            if all_tasks_count > 0:
+                st.progress(tasks_done / all_tasks_count, text=f"{tasks_done/all_tasks_count:.0%} Complete")
 
             st.write("---")
             st.subheader("Priority Breakdown")
