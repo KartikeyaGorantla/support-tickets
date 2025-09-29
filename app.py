@@ -20,8 +20,10 @@ client = create_client_sync(
     auth_token=st.secrets["turso"]["token"]
 )
 
+# --- DB Setup ---
+@st.cache_resource
 def init_db():
-    """Ensure tasks and notes tables exist."""
+    """Ensure tasks and notes tables exist (only runs once)."""
     client.execute("""
         CREATE TABLE IF NOT EXISTS tasks (
             Username TEXT NOT NULL,
@@ -39,23 +41,33 @@ def init_db():
         );
     """)
 
+# --- Cached Queries ---
+@st.cache_data(ttl=15)
 def load_user_tasks(username: str) -> pd.DataFrame:
     rows = client.execute(
         "SELECT rowid AS id, * FROM tasks WHERE Username = ?;",
         [username]
     ).rows
-    return pd.DataFrame(rows, columns=["id", "Username", "Task", "Status", "Priority", "CreatedAt"]) if rows else pd.DataFrame(
-        columns=["id", "Username", "Task", "Status", "Priority", "CreatedAt"]
+    return (
+        pd.DataFrame(rows, columns=["id", "Username", "Task", "Status", "Priority", "CreatedAt"])
+        if rows else pd.DataFrame(columns=["id", "Username", "Task", "Status", "Priority", "CreatedAt"])
     )
 
+@st.cache_data(ttl=15)
 def load_user_notes(username: str) -> pd.DataFrame:
     rows = client.execute(
         "SELECT rowid AS id, * FROM notes WHERE Username = ? ORDER BY CreatedAt DESC;",
         [username]
     ).rows
-    return pd.DataFrame(rows, columns=["id", "Username", "Note", "CreatedAt"]) if rows else pd.DataFrame(
-        columns=["id", "Username", "Note", "CreatedAt"]
+    return (
+        pd.DataFrame(rows, columns=["id", "Username", "Note", "CreatedAt"])
+        if rows else pd.DataFrame(columns=["id", "Username", "Note", "CreatedAt"])
     )
+
+def invalidate_cache():
+    """Clear cached queries after DB writes."""
+    load_user_tasks.clear()
+    load_user_notes.clear()
 
 # --- Authenticator ---
 authenticator = stauth.Authenticate(
@@ -88,7 +100,6 @@ if not st.session_state.get("authentication_status"):
             st.stop()
         elif st.session_state["authentication_status"] is None:
             st.stop()
-st.balloons()
 # --- App (only if logged in) ---
 if st.session_state.get("authentication_status"):
     username = st.session_state["username"]
@@ -111,6 +122,7 @@ if st.session_state.get("authentication_status"):
                 "INSERT INTO tasks (Username, Task, Status, Priority, CreatedAt) VALUES (?, ?, ?, ?, ?);",
                 [username, task_description, "To Do", task_priority, datetime.now().isoformat()]
             )
+            invalidate_cache()
             st.rerun()
 
         # --- Load Tasks ---
@@ -135,7 +147,7 @@ if st.session_state.get("authentication_status"):
                 key="active_tasks_editor"
             )
 
-            # Handle updates
+            updated = False
             for idx, row in edited_active_tasks.iterrows():
                 orig = active_tasks.loc[idx]
                 if row["Task"] != orig["Task"] or row["Priority"] != orig["Priority"] or row["Status"] != orig["Status"]:
@@ -143,32 +155,37 @@ if st.session_state.get("authentication_status"):
                         "UPDATE tasks SET Task = ?, Priority = ?, Status = ? WHERE rowid = ? AND Username = ?;",
                         [row["Task"], row["Priority"], row["Status"], row["id"], username]
                     )
-                    st.rerun()
+                    updated = True
+            if updated:
+                invalidate_cache()
+                st.rerun()
         else:
             st.info("No active tasks. Add one above!")
 
-        st.subheader("Completed Tasks", divider="rainbow")
-        if not completed_tasks.empty:
-            for _, row in completed_tasks.iterrows():
-                col1, col2, col3 = st.columns([0.6, 0.2, 0.2])
-                with col1:
-                    st.markdown(f"~~_{row['Task']}_~~")
-                with col2:
-                    if st.button("Undo", key=f"undo_{row['id']}"):
-                        client.execute(
-                            "UPDATE tasks SET Status = 'To Do' WHERE rowid = ? AND Username = ?;",
-                            [row["id"], username]
-                        )
-                        st.rerun()
-                with col3:
-                    if st.button("❌", key=f"delete_{row['id']}"):
-                        client.execute(
-                            "DELETE FROM tasks WHERE rowid = ? AND Username = ?;",
-                            [row["id"], username]
-                        )
-                        st.rerun()
-        else:
-            st.info("No tasks have been completed yet.")
+        with st.expander("✔️ Completed Tasks", expanded=False):
+            if not completed_tasks.empty:
+                for _, row in completed_tasks.iterrows():
+                    col1, col2, col3 = st.columns([0.6, 0.2, 0.2])
+                    with col1:
+                        st.markdown(f"~~_{row['Task']}_~~")
+                    with col2:
+                        if st.button("Undo", key=f"undo_{row['id']}"):
+                            client.execute(
+                                "UPDATE tasks SET Status = 'To Do' WHERE rowid = ? AND Username = ?;",
+                                [row["id"], username]
+                            )
+                            invalidate_cache()
+                            st.rerun()
+                    with col3:
+                        if st.button("❌", key=f"delete_{row['id']}"):
+                            client.execute(
+                                "DELETE FROM tasks WHERE rowid = ? AND Username = ?;",
+                                [row["id"], username]
+                            )
+                            invalidate_cache()
+                            st.rerun()
+            else:
+                st.info("No tasks have been completed yet.")
 
     # --- Notes Section ---
     with main2:
@@ -186,34 +203,37 @@ if st.session_state.get("authentication_status"):
                     "INSERT INTO notes (Username, Note, CreatedAt) VALUES (?, ?, ?);",
                     [username, new_note.strip(), datetime.now().isoformat()]
                 )
+                invalidate_cache()
                 st.rerun()
 
-        if not notes_df.empty:
-            for _, row in notes_df.iterrows():
-                with st.container():
-                    st.markdown(
-                        f"""
-                        <div style="
-                            background-color:#262730;
-                            color: white;
-                            padding:15px;
-                            margin:10px;
-                            border-radius:10px;
-                            min-height:75px;
-                        ">
-                        <p>{row['Note']}</p>
-                        </div>
-                        """,
-                        unsafe_allow_html=True,
-                    )
-                    if st.button("❌", key=f"del_note_{row['id']}"):
-                        client.execute(
-                            "DELETE FROM notes WHERE rowid = ? AND Username = ?;",
-                            [row["id"], username]
+        with st.expander("Your Notes", expanded=True):
+            if not notes_df.empty:
+                for _, row in notes_df.iterrows():
+                    with st.container():
+                        st.markdown(
+                            f"""
+                            <div style="
+                                background-color:#262730;
+                                color: white;
+                                padding:15px;
+                                margin:10px;
+                                border-radius:10px;
+                                min-height:75px;
+                            ">
+                            <p>{row['Note']}</p>
+                            </div>
+                            """,
+                            unsafe_allow_html=True,
                         )
-                        st.rerun()
-        else:
-            st.info("No notes yet. Add one above!")
+                        if st.button("❌", key=f"del_note_{row['id']}"):
+                            client.execute(
+                                "DELETE FROM notes WHERE rowid = ? AND Username = ?;",
+                                [row["id"], username]
+                            )
+                            invalidate_cache()
+                            st.rerun()
+            else:
+                st.info("No notes yet. Add one above!")
 
     # --- Sidebar Stats ---
     with st.sidebar:
@@ -221,37 +241,42 @@ if st.session_state.get("authentication_status"):
         if not df.empty:
             all_tasks_count = len(df)
             tasks_done = len(df[df["Status"] == "Done"])
-            # MODIFIED: Calculate pending tasks and change the metric
             pending_tasks_count = all_tasks_count - tasks_done
 
-            st.metric("Total Tasks", pending_tasks_count)
+            st.metric("Total Pending", pending_tasks_count)
             st.metric("📝 To Do", len(df[df["Status"] == "To Do"]))
             st.metric("⏳ In Progress", len(df[df["Status"] == "In Progress"]))
             st.metric("✔️ Completed", tasks_done)
 
-            # The progress bar should still be based on the grand total
             if all_tasks_count > 0:
                 st.progress(tasks_done / all_tasks_count, text=f"{tasks_done/all_tasks_count:.0%} Complete")
 
             st.write("---")
-            st.subheader("Priority Breakdown")
-            priority_counts = df["Priority"].value_counts().reset_index()
-            priority_counts.columns = ["Priority", "Count"]
+            st.subheader("Priority Breakdown (Active Only)")
 
-            chart = alt.Chart(priority_counts).mark_bar(cornerRadius=5).encode(
-                x=alt.X("Count:Q", title="Number of Tasks"),
-                y=alt.Y("Priority:N", sort="-x"),
-                color=alt.Color(
-                    "Priority:N",
-                    scale=alt.Scale(
-                        domain=["High", "Medium", "Low"],
-                        range=["#e45756", "#f58518", "#54a24b"]
+            # ✅ only count active tasks (exclude "Done")
+            active_only = df[df["Status"] != "Done"]
+
+            if not active_only.empty:
+                priority_counts = active_only["Priority"].value_counts().reset_index()
+                priority_counts.columns = ["Priority", "Count"]
+
+                chart = alt.Chart(priority_counts).mark_bar(cornerRadius=5).encode(
+                    x=alt.X("Count:Q", title="Number of Tasks"),
+                    y=alt.Y("Priority:N", sort="-x"),
+                    color=alt.Color(
+                        "Priority:N",
+                        scale=alt.Scale(
+                            domain=["High", "Medium", "Low"],
+                            range=["#e45756", "#f58518", "#54a24b"]
+                        ),
+                        legend=None
                     ),
-                    legend=None
-                ),
-                tooltip=["Priority", "Count"]
-            ).properties(title="Tasks by Priority")
+                    tooltip=["Priority", "Count"]
+                ).properties(title="Tasks by Priority")
 
-            st.altair_chart(chart, use_container_width=True)
+                st.altair_chart(chart, use_container_width=True)
+            else:
+                st.write("No active tasks to show priority breakdown.")
         else:
             st.write("No tasks to show statistics for.")
